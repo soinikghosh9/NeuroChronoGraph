@@ -175,8 +175,8 @@ The system integrates five distinct datasets to ensure robustness across recordi
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/neurochrongraph.git
-cd neurochrongraph
+git clone https://github.com/soinikghosh9/NeuroChronoGraph.git
+cd NeuroChronoGraph
 
 # Create virtual environment
 python -m venv venv
