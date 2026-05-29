@@ -10,7 +10,6 @@
 A comprehensive EEG analysis framework for **4-class dementia classification** (AD, FTD, CN, MCI) using a hierarchical three-stage architecture: Screening → Staging → Subtyping.
 
 <img width="3609" height="2607" alt="Figure1_graphical_abstract_page-0001" src="https://github.com/user-attachments/assets/782befe7-fe2b-4b3e-81fa-5e5beed66809" />
-)
 
 ---
 
