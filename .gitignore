@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Large binary data files
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.h5
+*.hdf5
+*.set
+*.fdt
+*.edf
+*.cnt
+*.vhdr
+*.vmrk
+*.eeg
+
+# Datasets and outputs (too large for git / regeneratable)
+datasets/
+outputs/
+
+# Logs
+logs/
+*.log
+logs.txt
+
+# Manuscript sources, figures, and submission materials (not part of the code release)
+*.tex
+*.bib
+*.pdf
+Figs/
+cover_letter.txt
+review.txt
+discuss.txt
+Review of NeuroChronoGraph.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Agent / assistant tooling and local settings
+.claude/
+.agents/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Virtual environments
+venv/
+env/
+.env/
+.venv/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Manuscript figure-layout working note (dev)
+docs/figure_organization.md
