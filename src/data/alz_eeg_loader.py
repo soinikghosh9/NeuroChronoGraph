@@ -17,7 +17,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, List
 import mne
-from sklearn.preprocessing import RobustScaler
+from src.data.scaling import robust_scale   # centralised: see src/data/scaling.py
 
 from .base_loader import BaseDataset
 from ..config.config import CHANNEL_NAMES, SAMPLING_RATE
@@ -133,15 +133,15 @@ class AlzEEGDataset(BaseDataset):
         min_len = min(lengths)
         data = np.stack([x[:min_len] for x in data_list])
         
-        # Create MNE Raw
-        # Dataset sampling rate? Paper says 19 electrodes.
-        # Usually these are 256Hz or 128Hz or 500Hz.
-        # **Assume 256Hz** based on common Mendeley/Kaggle variations if not specified.
-        # Wait, user context said "check associated papers". 
-        # For safety, I should infer or use 250Hz target directly via resampling.
-        # Let's assume 256Hz input for now (standard for these datasets).
-        sfreq_in = 250.0 # Placeholder, often described in dataset description.
-        
+        # Create MNE Raw.
+        # AUDIT T4.7: the per-channel .txt files carry NO sampling-rate header, so we must use
+        # the documented dataset constant (the previous 250 Hz was an unverified guess). The
+        # Pineda/Florez AD-EEG corpus (AD/Healthy, Eyes_closed/Eyes_open, "PacienteN" channel-per-
+        # file layout) is recorded at 128 Hz. If you have a source asserting otherwise, set this.
+        ALZ_EEG_NATIVE_SFREQ = 128.0  # documented; no in-file header to read
+        sfreq_in = ALZ_EEG_NATIVE_SFREQ
+        print(f"loaded {subject_id}: native {sfreq_in:g} Hz -> resample {SAMPLING_RATE} Hz")
+
         info_mne = mne.create_info(ch_names=ch_names, sfreq=sfreq_in, ch_types='eeg')
         raw = mne.io.RawArray(data, info_mne, verbose=False)
         
@@ -153,19 +153,13 @@ class AlzEEGDataset(BaseDataset):
         # For now, just leave as is, model will handle or we pad.
         # (Ideal: Interpolate to full 19 list)
         
-        # Resample to Global SAMPLING_RATE
+        # Resample to Global SAMPLING_RATE (native rate logged above).
         if raw.info['sfreq'] != SAMPLING_RATE:
-             print(f"  Resampling {subject_id} from {raw.info['sfreq']} to {SAMPLING_RATE} Hz")
              raw.resample(SAMPLING_RATE)
         
         # Robust Scaling
         data = raw.get_data()
-        scaler = RobustScaler(quantile_range=(25, 75))
-        data_scaled = scaler.fit_transform(data.T).T
-        
-        # Handle potential NaNs from flat channels (IQR=0)
-        if np.isnan(data_scaled).any() or np.isinf(data_scaled).any():
-            data_scaled = np.nan_to_num(data_scaled, nan=0.0, posinf=0.0, neginf=0.0)
+        data_scaled = robust_scale(data)
             
         raw._data = data_scaled
         

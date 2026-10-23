@@ -72,3 +72,13 @@ build/
 
 # Manuscript figure-layout working note (dev)
 docs/figure_organization.md
+
+# Internal audit / remediation notes (never publish)
+AUDIT.md
+
+# Manuscript sources and submission materials (not part of the code release)
+model_paper/
+
+# Model weights are released on Hugging Face, not in git
+hf_release/
+*.safetensors

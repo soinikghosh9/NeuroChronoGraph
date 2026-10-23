@@ -25,7 +25,7 @@ import scipy.io as sio
 from pathlib import Path
 from typing import Dict, List
 import mne
-from sklearn.preprocessing import RobustScaler
+from src.data.scaling import robust_scale   # centralised: see src/data/scaling.py
 
 from .base_loader import BaseDataset
 from ..config.config import CHANNEL_NAMES, SAMPLING_RATE
@@ -155,18 +155,8 @@ class MCIDataset(BaseDataset):
             'mmse': mmse_val,
             'metadata': np.array([0.5, 0.5, -1.0], dtype=np.float32) # age_norm, sex, mmse_norm
         }
-            
-        return {
-            'subject_id': subject_id,
-            'dataset': 'MCI_Dataset',
-            'group': info['group'],
-            'label': info['label'],
-            'age': 70.0,  # Dummy
-            'sex': 'Unknown',
-            'mmse': mmse_approx,
-            'metadata': np.array([0.5, 0.5, mmse_approx / 30.0], dtype=np.float32)
-        }
-    
+
+
     def load_raw(self, subject_id: str) -> mne.io.Raw:
         """
         Load and concatenate all MAT files for a subject, return MNE Raw.
@@ -277,19 +267,17 @@ class MCIDataset(BaseDataset):
         montage = mne.channels.make_standard_montage('standard_1020')
         raw.set_montage(montage, on_missing='ignore')
         
-        # Resample to Global SAMPLING_RATE
-        if raw.info['sfreq'] != SAMPLING_RATE:
-             print(f"  Resampling {subject_id} from {raw.info['sfreq']} to {SAMPLING_RATE} Hz")
+        # Resample to Global SAMPLING_RATE. Native rate = documented per-subject constant
+        # (256 Hz: MCI1-4/AD1-34; 128 Hz: MCI5-7/AD35-59/normal1-2 & *fir CONTROLs) from
+        # readme.txt, set in _scan_dataset (these .mat files carry no header). (AUDIT T4.7)
+        native_sfreq = float(raw.info['sfreq'])
+        print(f"loaded {subject_id}: native {native_sfreq:g} Hz -> resample {SAMPLING_RATE} Hz")
+        if native_sfreq != SAMPLING_RATE:
              raw.resample(SAMPLING_RATE)
 
         # Robust scaling
         data = raw.get_data()
-        scaler = RobustScaler(quantile_range=(25, 75))
-        data_scaled = scaler.fit_transform(data.T).T
-        
-        # Handle NaNs/Infs
-        if np.isnan(data_scaled).any() or np.isinf(data_scaled).any():
-            data_scaled = np.nan_to_num(data_scaled, nan=0.0, posinf=0.0, neginf=0.0)
+        data_scaled = robust_scale(data)
         
         raw._data = data_scaled
         

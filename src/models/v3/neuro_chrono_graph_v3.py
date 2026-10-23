@@ -59,6 +59,11 @@ class NeuroChronoGraphV3(nn.Module):
         
         # Cross Band (V2)
         self.cross_band_attn = CrossBandAttention(n_bands, hidden_dim, n_heads // 2, dropout)
+
+        # Projects the cross-band context into the fused embedding. Without this the band
+        # path is dead: forward() computed `coupled_bands` and used only the coupling matrix
+        # as a diagnostic, so band information never reached the classifier.
+        self.band_to_fused = nn.Linear(hidden_dim, hidden_dim * 4)
         
         # Graph Layers (V2)
         self.gat_layers = nn.ModuleList([
@@ -138,11 +143,15 @@ class NeuroChronoGraphV3(nn.Module):
         temporal_enc = self.eeg_encoder(x).transpose(1, 2)
         node_features = self.channel_encoder(x)
 
+        band_ctx = None
         if band_features:
             band_enc = self.band_encoder(band_features)
             band_enc_4d = band_enc.unsqueeze(2).expand(-1, -1, self.n_channels, -1)
             coupled_bands, coupling_mat = self.cross_band_attn(band_enc_4d)
             outputs['band_coupling'] = coupling_mat
+            # Pool over bands and nodes -> [B, hidden]. Fused into `combined` below so the
+            # band-limited representation actually reaches the heads.
+            band_ctx = coupled_bands.mean(dim=(1, 2))
 
         # 2. Graph Learning
         learned_adj, adj_attn = self.adaptive_graph(node_features, adj)
@@ -169,7 +178,9 @@ class NeuroChronoGraphV3(nn.Module):
         # 6. Fusion
         graph_pooled = h.mean(dim=1)
         combined = torch.cat([modular_out, temporal_out, graph_pooled], dim=-1)
-        
+        if band_ctx is not None:
+            combined = combined + self.band_to_fused(band_ctx)
+
         if self.use_clinical and clinical_data:
             combined, final_unc = self.final_conditioner(combined.unsqueeze(1), 0, clinical_data)
             combined = combined.squeeze(1)

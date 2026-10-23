@@ -5,6 +5,7 @@ This module contains all global settings, paths, and hyperparameters
 for the AD/FTD classification project.
 """
 
+import os
 from pathlib import Path
 import torch
 
@@ -165,8 +166,11 @@ PREPROCESSING = {
 # DATASET WRAPPER CONFIGURATION (Anti-Overfitting)
 # ==============================================================================
 
+# Window length is env-overridable for the longer-window A/B (audit: 4s -> 0.25Hz; 8s captures slow
+# dynamics better). NCG_NTIMES=2048 -> 8s @ 256Hz. Default 1024 (4s) == v1..v4 (unchanged).
+_NCG_NTIMES = int(os.environ.get('NCG_NTIMES', '1024'))
 DATASET_CONFIG = {
-    'n_times': 1024,                   # Window size in samples (4 sec @ 256Hz)
+    'n_times': _NCG_NTIMES,            # Window size in samples (default 1024 = 4 sec @ 256Hz)
     'overlap_ratio': 0.25,             # 25% overlap (balance training samples vs overfitting)
     'max_windows_per_subject': 50,     # Limit windows per subject
     'enable_augmentation': True,       # Enable minority class augmentation
@@ -216,7 +220,8 @@ FEATURE_CONFIG = {
     
     # Graph metrics
     'compute_graph_metrics': True,
-    'graph_threshold': 0.3,        # Threshold for binarization
+    'graph_threshold': 0.3,        # Absolute threshold (legacy; used only if keep_ratio disabled)
+    'graph_keep_ratio': 0.10,      # AUDIT T4.8: proportional edge density (10%) for graph metrics
 }
 
 # ==============================================================================
@@ -320,7 +325,28 @@ VALIDATION_CONFIG = {
 # DEVICE CONFIGURATION
 # ==============================================================================
 
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+def _resolve_device():
+    """Resolve the compute device, robust to transient post-reboot CUDA-not-ready.
+
+    A process importing this while CUDA is briefly unavailable (e.g. a scheduled task launched
+    seconds after a reboot) would otherwise freeze DEVICE='cpu' and silently train on CPU ~10x
+    slower (this happened once and wasted ~11 h on baselines). When NCG_REQUIRE_CUDA=1 (set by
+    the GPU launchers), retry briefly for the transient, then FAIL LOUDLY instead of CPU-training."""
+    import os as _os, time as _time
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    if _os.environ.get('NCG_REQUIRE_CUDA') == '1':
+        for _ in range(6):                      # ~30s grace for post-reboot CUDA init
+            _time.sleep(5)
+            if torch.cuda.is_available():
+                return torch.device('cuda')
+        raise RuntimeError(
+            "NCG_REQUIRE_CUDA=1 but CUDA is unavailable after retries -- aborting to avoid silent "
+            "CPU training. Check GPU/driver (nvidia-smi), then re-run.")
+    return torch.device('cpu')
+
+
+DEVICE = _resolve_device()
 N_JOBS = 8  # Optimal for Intel Ultra 9 (24 cores, use subset for I/O)
 
 # ==============================================================================
@@ -362,10 +388,14 @@ GPU_CONFIG = {
 # DATALOADER OPTIMIZATION (Intel Ultra 9 with 24 cores)
 # ==============================================================================
 
+# num_workers is env-driven. Default 0 stays safe on Windows (spawn pickles the dataset); set
+# NCG_NUM_WORKERS>0 ONLY together with NCG_MEMMAP=1 so workers SHARE the on-disk recordings via the
+# OS page cache instead of each duplicating the in-RAM data (which caused the MemoryError).
+_NCG_NW = int(os.environ.get('NCG_NUM_WORKERS', '0'))
 DATALOADER_CONFIG = {
-    'num_workers': 0,              # Set to 0 to fix MemoryError on Windows (Avoids spawn/pickle overhead)
-    'persistent_workers': False,   # Must be False if num_workers is 0
-    'prefetch_factor': None,       # Must be None if num_workers is 0
+    'num_workers': _NCG_NW,
+    'persistent_workers': _NCG_NW > 0,            # keep workers alive across epochs (avoid respawn cost)
+    'prefetch_factor': (4 if _NCG_NW > 0 else None),
     'pin_memory': True,            # Faster GPU transfer
     'drop_last': False,
 }

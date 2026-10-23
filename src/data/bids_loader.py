@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 import mne
 import warnings
-from sklearn.preprocessing import RobustScaler
+from src.data.scaling import robust_scale   # centralised: see src/data/scaling.py
 
 from .base_loader import BaseDataset
 from ..config.config import (
@@ -27,10 +27,14 @@ class BIDSDataset(BaseDataset):
                  root_path: Path,
                  dataset_name: str = "ds004504",
                  use_derivatives: bool = True,
+                 use_pkl_cache: bool = True,
                  verbose: bool = True):
         super().__init__(root_path)
         self.dataset_name = dataset_name
         self.use_derivatives = use_derivatives
+        # Default True preserves every previously computed result. Set False to read the source
+        # recordings instead of the Laplacian-transformed cache -- see the note in `load_raw`.
+        self.use_pkl_cache = use_pkl_cache
         self.verbose = verbose
         
         # Load participants information
@@ -106,8 +110,21 @@ class BIDSDataset(BaseDataset):
     
     def load_raw(self, subject_id: str) -> mne.io.Raw:
         # Optimization: Check for preprocessed PKL (Generic for any BIDS dataset)
+        #
+        # WARNING -- this cache is not a neutral speed-up. `01_preprocess_all.py` built it with
+        # `apply_reference=True` AND `apply_csd=True`, so a cached recording has had a common
+        # average reference and a SURFACE LAPLACIAN applied, and was then rebuilt by hstacking
+        # 4 s epochs at 25% overlap (duplicating a quarter of the signal and inserting a
+        # discontinuity every 4 s, which inflates apparent duration by 4/3).
+        #
+        # Only `bids_loader` consults it, and only ds004504/ds006036 have entries -- so the
+        # dementia TEST cohort was Laplacian-transformed while the CAUEEG TRAINING cohort was
+        # not. Measured on sub-001, the cached copy has 3.2x less relative delta and 4.5x more
+        # relative gamma than its own source file.
+        #
+        # `use_pkl_cache=False` bypasses it, which is what any harmonised pipeline must do.
         pkl_path = OUTPUT_ROOT / "preprocessed" / f"{self.dataset_name}_{subject_id}_preprocessed.pkl"
-        if pkl_path.exists():
+        if self.use_pkl_cache and pkl_path.exists():
             try:
                 # print(f"Loading cached: {pkl_path.name}") # verbose off to keep clean?
                 return self._load_from_pkl(pkl_path)
@@ -147,8 +164,10 @@ class BIDSDataset(BaseDataset):
         # 1. Standardize Channels
         raw = self._standardize_channels(raw)
         
-        # 2. Resample
-        if raw.info['sfreq'] != SAMPLING_RATE:
+        # 2. Resample -- native rate read directly from the EEGLAB header (MNE). (AUDIT T4.7)
+        native_sfreq = float(raw.info['sfreq'])
+        print(f"loaded {subject_id}: native {native_sfreq:g} Hz -> resample {SAMPLING_RATE} Hz")
+        if native_sfreq != SAMPLING_RATE:
             raw.resample(SAMPLING_RATE)
             
         # 3. Robust Scaling with nan check
@@ -166,14 +185,7 @@ class BIDSDataset(BaseDataset):
             except Exception as e:
                 print(f"Warning: Failed to set channel types in bids_loader: {e}")
 
-        scaler = RobustScaler(quantile_range=(25, 75))
-        data_scaled = scaler.fit_transform(data.T).T
-        
-        if np.isnan(data_scaled).any() or np.isinf(data_scaled).any():
-            # Replace NaNs and Infs with 0
-            data_scaled = np.nan_to_num(data_scaled, nan=0.0, posinf=0.0, neginf=0.0)
-            
-        raw._data = data_scaled
+        raw._data = robust_scale(data)
             
         return raw
 
@@ -271,10 +283,7 @@ class BIDSDataset(BaseDataset):
         # Safe to assume it might be cleaner, but RobustScaler is idempotent-ish if already scaled around median.
         # Let's Apply it to be safe and consistent with other sources.
         
-        data = raw.get_data()
-        scaler = RobustScaler(quantile_range=(25, 75))
-        data_scaled = scaler.fit_transform(data.T).T
-        raw._data = data_scaled
+        raw._data = robust_scale(raw.get_data())
         
         return raw
 

@@ -144,6 +144,114 @@ class ChannelWiseEncoder(nn.Module):
         return node_features
 
 
+class BandSpecificEncoder(nn.Module):
+    """
+    Encode the band-filtered signals into one embedding per frequency band.
+
+    Returns ``[batch, n_bands, hidden_dim]`` by default, which is the shape
+    :class:`NeuroChronoGraphV3` broadcasts over nodes before handing to
+    :class:`CrossBandAttention`. With ``per_node=True`` it returns
+    ``[batch, n_bands, n_channels, hidden_dim]`` instead, keeping the spatial axis so the
+    band information can be injected into the graph nodes rather than as a global context
+    vector (used by v5).
+
+    Gain invariance is by construction, not by augmentation. Two properties matter:
+
+    1. Per-channel band powers are converted to *relative* power -- each band's share of
+       that channel's total -- before any learned layer sees them. ``dataset_wrapper``
+       divides every band by the same window std, so that ratio survives normalisation.
+    2. The envelope path is amplitude-normalised per (band, channel), so it encodes the
+       temporal *shape* of the band envelope and nothing about its scale.
+
+    This matters because domain randomisation over spectral tilt failed here (fold 0
+    kappa 0.487 -> 0.335): nuisance gain and the disease signal share the frequency axis,
+    so invariance has to be analytic rather than learned.
+    """
+
+    DEFAULT_BANDS = ('delta', 'theta', 'alpha', 'beta', 'gamma')
+
+    def __init__(self,
+                 n_channels: int = 19,
+                 hidden_dim: int = 128,
+                 n_bands: int = 5,
+                 band_names: Optional[List[str]] = None,
+                 dropout: float = 0.1,
+                 per_node: bool = False):
+        super().__init__()
+
+        self.band_names = list(band_names) if band_names else list(self.DEFAULT_BANDS[:n_bands])
+        self.n_bands = len(self.band_names)
+        self.n_channels = n_channels
+        self.hidden_dim = hidden_dim
+        self.per_node = per_node
+        self.eps = 1e-8
+
+        env_dim = max(hidden_dim // 4, 8)
+        self.env_dim = env_dim
+
+        # Relative-power path. Input is one scalar per channel, per band.
+        self.power_proj = nn.Sequential(
+            nn.Linear(1 if per_node else n_channels, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+
+        # Envelope path: shared across bands and channels, applied to the
+        # amplitude-normalised band signal so only its shape is encoded.
+        self.env_conv = nn.Sequential(
+            nn.Conv1d(1, env_dim, kernel_size=15, stride=4, padding=7),
+            nn.GELU(),
+            nn.Conv1d(env_dim, env_dim, kernel_size=9, stride=4, padding=4),
+            nn.GELU(),
+            nn.AdaptiveAvgPool1d(1),
+        )
+        self.env_proj = nn.Linear(env_dim if per_node else env_dim * n_channels, hidden_dim)
+
+        self.fuse = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+        # Lets the model tell bands apart once their features are pooled.
+        self.band_bias = nn.Parameter(torch.zeros(self.n_bands, hidden_dim))
+
+    def _stack(self, band_features: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """Order the band dict deterministically into ``[B, n_bands, C, T]``."""
+        missing = [b for b in self.band_names if b not in band_features]
+        if missing:
+            raise KeyError(
+                f"BandSpecificEncoder expected bands {self.band_names}, missing {missing}. "
+                f"Got {sorted(band_features)}."
+            )
+        return torch.stack([band_features[b] for b in self.band_names], dim=1)
+
+    def forward(self, band_features: Dict[str, torch.Tensor]) -> torch.Tensor:
+        stack = self._stack(band_features).float()          # [B, Bd, C, T]
+        B, Bd, C, T = stack.shape
+
+        # --- relative band power: gain-invariant by construction -------------------
+        power = stack.pow(2).mean(dim=-1)                    # [B, Bd, C]
+        rel = power / (power.sum(dim=1, keepdim=True) + self.eps)
+
+        # --- envelope shape, amplitude-normalised ----------------------------------
+        xn = stack / (stack.std(dim=-1, keepdim=True) + self.eps)
+        env = self.env_conv(xn.reshape(B * Bd * C, 1, T))    # [B*Bd*C, env_dim, 1]
+        env = env.reshape(B, Bd, C, self.env_dim)
+
+        if self.per_node:
+            p_emb = self.power_proj(rel.unsqueeze(-1))       # [B, Bd, C, H]
+            e_emb = self.env_proj(env)                       # [B, Bd, C, H]
+            out = self.fuse(torch.cat([p_emb, e_emb], dim=-1))
+            return out + self.band_bias.view(1, Bd, 1, self.hidden_dim)
+
+        p_emb = self.power_proj(rel)                         # [B, Bd, H]
+        e_emb = self.env_proj(env.reshape(B, Bd, C * self.env_dim))
+        out = self.fuse(torch.cat([p_emb, e_emb], dim=-1))
+        return out + self.band_bias.unsqueeze(0)
+
+
 class NeuroChronoGraphV2(nn.Module):
     """
     NeuroChronoGraph Version 2.
@@ -168,6 +276,10 @@ class NeuroChronoGraphV2(nn.Module):
                  dropout: float = 0.3,
                  use_clinical: bool = True,
                  use_uncertainty: bool = True,
+                 use_graph_attention: bool = True,
+                 use_hierarchical: bool = True,
+                 use_temporal: bool = True,
+                 use_modular: bool = True,
                  feature_streams: Optional[List[str]] = None,
                  stream_dim: int = 64,
                  **kwargs):
@@ -196,7 +308,19 @@ class NeuroChronoGraphV2(nn.Module):
         self.hidden_dim = hidden_dim
         self.use_clinical = use_clinical
         self.use_uncertainty = use_uncertainty
-        
+        # ABLATION FLAGS (default True == production behaviour, byte-for-byte).
+        # use_graph_attention=False: bypass adaptive_graph/gat_layers/modular_transformer
+        #   and substitute a mean-pool of node features (preserves hidden*4 fused width).
+        # use_hierarchical=False: add a flat Linear(hidden*4, 4) head, emit logits_flat.
+        self.use_graph_attention = use_graph_attention
+        self.use_hierarchical = use_hierarchical
+        # use_temporal / use_modular=False: zero that stream's contribution to the
+        # fused embedding before concatenation. Fused width is unchanged, so the
+        # heads and any production checkpoint load byte-for-byte; retraining under
+        # the flag gives a clean single-factor ablation of each stream.
+        self.use_temporal = use_temporal
+        self.use_modular = use_modular
+
         # ===== STAGE 1: Initial Encoding =====
         self.eeg_encoder = EEGEncoder(
             n_channels=n_channels,
@@ -326,6 +450,17 @@ class NeuroChronoGraphV2(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, 2)
         )
+
+        # ABLATION: flat 4-class head (AD/FTD/CN/MCI). Only constructed when
+        # use_hierarchical=False, so production checkpoints/state_dict are unchanged.
+        if not self.use_hierarchical:
+            self.flat_head = nn.Sequential(
+                nn.Linear(classifier_input_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.LeakyReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, 4)
+            )
         
         # MMSE regression head (for clinical validation)
         self.mmse_regressor = nn.Sequential(
@@ -354,7 +489,24 @@ class NeuroChronoGraphV2(nn.Module):
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.Conv1d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-    
+
+    def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Front-end feature extraction: raw EEG -> (temporal tokens, channel node features).
+
+        Returns:
+            temporal_enc : [B, T', hidden]  -- temporal token sequence (for the temporal transformer)
+            node_features: [B, n_channels, hidden] -- per-electrode node features (for the graph)
+
+        Extracted from forward() so SSL/foundation-model subclasses (e.g. NeuroChronoGraphSSL) can
+        override JUST this method to inject pretrained representations, while inheriting the entire
+        graph/temporal/hierarchical stack. Behaviour is byte-identical to the original inline code,
+        so existing checkpoints load and predict identically.
+        """
+        temporal_enc = self.eeg_encoder(x)            # [B, hidden, T']
+        temporal_enc = temporal_enc.transpose(1, 2)   # [B, T', hidden]
+        node_features = self.channel_encoder(x)       # [B, n_channels, hidden]
+        return temporal_enc, node_features
+
     def forward(self,
                 x: torch.Tensor,
                 adj: Optional[torch.Tensor] = None,
@@ -378,46 +530,61 @@ class NeuroChronoGraphV2(nn.Module):
         """
         batch_size = x.shape[0]
         outputs = {}
-        
+
         # ===== STAGE 1: Initial Encoding =====
-        # Temporal encoding (for temporal transformer branch)
-        temporal_enc = self.eeg_encoder(x)  # [B, hidden, T']
-        temporal_enc = temporal_enc.transpose(1, 2)  # [B, T', hidden]
-        
-        # Channel-wise node features (for graph processing)
-        # Each channel gets distinct features - critical for meaningful graph structure
-        node_features = self.channel_encoder(x)  # [B, n_channels, hidden]
-        
+        # Extracted to self.encode() so SSL/foundation-model subclasses can override JUST the
+        # front-end (fork-a integration) while reusing the entire graph/temporal/hierarchical
+        # stack unchanged. Behaviour here is byte-identical to the original inline code.
+        temporal_enc, node_features = self.encode(x)
+
 
         
-        # ===== STAGE 2: Adaptive Graph Learning =====
-        learned_adj, adj_attn = self.adaptive_graph(node_features, adj)
-        outputs['learned_adjacency'] = learned_adj
-        
-        # ===== STAGE 3: Graph Attention Layers =====
-        h = node_features
-        layer_idx = 0
-        
-        for gat_layer in self.gat_layers:
-            h = gat_layer(h, learned_adj)
-            
-            # Apply clinical conditioning if available
-            if self.use_clinical and clinical_data is not None:
-                # Use GAT conditioner for these layers
-                h, _ = self.gat_conditioner(h, layer_idx, clinical_data)
-                layer_idx += 1
-        
-        # ===== STAGE 4: Modular Brain Transformer =====
-        modular_out, modular_info = self.modular_transformer(h, learned_adj)
-        outputs['module_coupling'] = modular_info['coupling_matrix']
-        
+        # ===== STAGE 2-4: Graph path (adaptive graph -> GAT -> modular) =====
+        # ABLATION: when use_graph_attention is False, skip the learned-graph pipeline and
+        # substitute a mean-pool of the raw node features for BOTH the modular and graph-pooled
+        # tensors, preserving the fused width hidden*4 so every downstream head is unchanged.
+        if self.use_graph_attention:
+            # ===== STAGE 2: Adaptive Graph Learning =====
+            learned_adj, adj_attn = self.adaptive_graph(node_features, adj)
+            outputs['learned_adjacency'] = learned_adj
+
+            # ===== STAGE 3: Graph Attention Layers =====
+            h = node_features
+            layer_idx = 0
+
+            for gat_layer in self.gat_layers:
+                h = gat_layer(h, learned_adj)
+
+                # Apply clinical conditioning if available
+                if self.use_clinical and clinical_data is not None:
+                    # Use GAT conditioner for these layers
+                    h, _ = self.gat_conditioner(h, layer_idx, clinical_data)
+                    layer_idx += 1
+
+            # ===== STAGE 4: Modular Brain Transformer =====
+            modular_out, modular_info = self.modular_transformer(h, learned_adj)
+            outputs['module_coupling'] = modular_info['coupling_matrix']
+            graph_pooled = h.mean(dim=1)  # [B, hidden]
+        else:
+            # No-graph ablation: mean-pool the channel-wise node features.
+            h = node_features
+            pooled = node_features.mean(dim=1)  # [B, hidden]
+            modular_out = pooled
+            graph_pooled = pooled
+
         # ===== STAGE 5: Temporal Processing =====
         temporal_out, temporal_weights = self.temporal_transformer(temporal_enc)
         outputs['temporal_weights'] = temporal_weights
-        
+
+        # ABLATION: zero a stream's contribution (fused width preserved so heads
+        # and production checkpoints are unaffected; default keeps both streams).
+        if not self.use_modular:
+            modular_out = torch.zeros_like(modular_out)
+        if not self.use_temporal:
+            temporal_out = torch.zeros_like(temporal_out)
+
         # ===== STAGE 6: Feature Fusion =====
         # Combine graph and temporal features
-        graph_pooled = h.mean(dim=1)  # [B, hidden]
         combined = torch.cat([modular_out, temporal_out, graph_pooled], dim=-1)
         
         # Final clinical conditioning
@@ -458,6 +625,12 @@ class NeuroChronoGraphV2(nn.Module):
         logits_subtype = self.subtype_head(combined)
         outputs['logits_subtype'] = logits_subtype
         outputs['probs_subtype'] = F.softmax(logits_subtype, dim=-1)
+
+        # ABLATION: flat 4-class logits, only when flat_head was built (use_hierarchical=False).
+        if not self.use_hierarchical:
+            logits_flat = self.flat_head(combined)
+            outputs['logits_flat'] = logits_flat
+            outputs['probs_flat'] = F.softmax(logits_flat, dim=-1)
         
         # MMSE regression
         mmse_pred = self.mmse_regressor(combined)
@@ -509,6 +682,8 @@ def create_neuro_chrono_graph_v2(config: Dict = None) -> NeuroChronoGraphV2:
         'n_channels', 'n_times', 'n_classes', 'n_bands',
         'hidden_dim', 'n_graph_layers', 'n_temporal_layers',
         'n_heads', 'dropout', 'clinical_dropout', 'use_clinical', 'use_uncertainty',
+        'use_graph_attention', 'use_hierarchical',
+        'use_temporal', 'use_modular',
         'feature_streams', 'stream_dim',
     }
 

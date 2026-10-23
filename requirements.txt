@@ -1,46 +1,14 @@
-# Core Dependencies
-numpy>=1.24.0
-scipy>=1.11.0
-pandas>=2.0.0
-scikit-learn>=1.3.0
-matplotlib>=3.7.0
-seaborn>=0.12.0
-
-# EEG Processing
-mne>=1.6.0
-mne-connectivity>=0.6.0
-mne-bids>=0.14
-
-# Deep Learning
-torch>=2.0.0
-torch-geometric>=2.4.0
-
-# Complexity Analysis
-neurokit2>=0.2.0
-antropy>=0.1.6
-
-# Graph Theory
-bctpy>=0.6.0
-
-# EEG Microstate Analysis
-pycrostates>=0.4.0
-
-# Jupyter
-jupyter>=1.0.0
-ipykernel>=6.0.0
-ipywidgets>=8.0.0
-
-# Statistics
-statsmodels>=0.14.0
-
-# Utilities
-tqdm>=4.65.0
-joblib>=1.3.0
-h5py>=3.9.0
-
-# Visualization
-plotly>=5.15.0
-nilearn>=0.10.0
-
-# Testing
-pytest>=7.4.0
+# Versions used for the reported results (Python 3.12, Windows 11, CUDA 12.8).
+numpy>=2.0
+scipy>=1.13
+pandas>=2.2
+scikit-learn>=1.5
+h5py>=3.11            # P-ADIC files
+mne>=1.8
+mne-icalabel>=0.9     # ICLabel in the harmonised cleaning step
+torch>=2.4            # reported runs: 2.11 + CUDA 12.8
+braindecode==1.5.2    # published baselines and pretrained encoders; pinned to the trained checkpoints
+safetensors>=0.4      # released weights
+huggingface_hub>=0.24 # pretrained encoders and released weights
+# torch-geometric is optional: only the legacy src/models/layers/gat_layer.py imports it, with a fallback,
+# and none of the reported models uses that layer.

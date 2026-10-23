@@ -20,7 +20,7 @@ import torch.nn.functional as F
 
 
 STREAM_DIMS: Dict[str, int] = {
-    "spectral": 118,
+    "spectral": 123,   # 19x5 channels + 5x5 regions + 3 summary (was 118 with 4 regions)
     "connectivity": 855,
     "complexity": 76,
     "microstate": 24,

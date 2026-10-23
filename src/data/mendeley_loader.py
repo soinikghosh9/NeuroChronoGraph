@@ -13,7 +13,7 @@ import scipy.io
 from pathlib import Path
 from typing import Dict, List
 import mne
-from sklearn.preprocessing import RobustScaler
+from src.data.scaling import robust_scale   # centralised: see src/data/scaling.py
 
 from .base_loader import BaseDataset
 from ..config.config import CHANNEL_NAMES, SAMPLING_RATE
@@ -124,9 +124,15 @@ class MendeleyDataset(BaseDataset):
         # Or Fp1, Fp2, C3, C4? Without labels this is a guess.
         # Mapping to first 4 for pipeline compatibility.
         current_ch_names = CHANNEL_NAMES[:n_ch]
-        
-        sfreq_in = 250.0 # Assumption based on 600 samples ~ 2.4s?
-        
+
+        # AUDIT T4.7: the .mat 'epoch' array carries no rate field. Per the dataset's own data
+        # descriptor (Mendeley; 1-s2.0-S2352340923004080), signals were acquired at 2000 Hz and
+        # DOWN-SAMPLED to 200 Hz (600 samples = 3 s at 200 Hz). The stored data is therefore
+        # 200 Hz (NOT the previous 250 Hz guess, nor the 2000 Hz acquisition rate).
+        MENDELEY_NATIVE_SFREQ = 200.0  # documented; no in-file header to read
+        sfreq_in = MENDELEY_NATIVE_SFREQ
+        print(f"loaded {subject_id}: native {sfreq_in:g} Hz -> resample {SAMPLING_RATE} Hz")
+
         info_mne = mne.create_info(ch_names=current_ch_names, sfreq=sfreq_in, ch_types='eeg')
         raw = mne.io.RawArray(data, info_mne, verbose=False)
         
@@ -137,19 +143,13 @@ class MendeleyDataset(BaseDataset):
         # Custom standardize to add missing channels as zeros
         raw = self._pad_channels(raw)
         
-        # Resample to Global SAMPLING_RATE
+        # Resample to Global SAMPLING_RATE (native rate logged above).
         if raw.info['sfreq'] != SAMPLING_RATE:
-             print(f"  Resampling {subject_id} from {raw.info['sfreq']} to {SAMPLING_RATE} Hz")
              raw.resample(SAMPLING_RATE)
 
         # Robust Scaling
         data = raw.get_data()
-        scaler = RobustScaler(quantile_range=(25, 75))
-        data_scaled = scaler.fit_transform(data.T).T
-        
-        # Handle potential NaNs from flat channels (IQR=0)
-        if np.isnan(data_scaled).any():
-            data_scaled = np.nan_to_num(data_scaled, nan=0.0, posinf=0.0, neginf=0.0)
+        data_scaled = robust_scale(data)
             
         raw._data = data_scaled
         

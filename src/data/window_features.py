@@ -24,15 +24,35 @@ BANDS = {
     "gamma": (30.0, 45.0),
 }
 
+# Derived from config.CHANNEL_NAMES rather than hard-coded, because the hard-coded version
+# was WRONG: it assumed the order (Fp1 Fp2 F7 F3 Fz F4 F8 ...) while this repository uses
+# (Fp1 Fp2 F3 F4 C3 C4 P3 P4 O1 O2 F7 F8 T3 T4 T5 T6 Fz Cz Pz). Under the real order its
+# "parietal" [13,14,15] is T4/T5/T6 and its "occipital" [17,18] is Cz/Pz, so every
+# region-averaged feature pooled the wrong electrodes. Harmless only because
+# compute_feature_streams defaults to False and these features were never used.
+_CANONICAL_ORDER = ['Fp1', 'Fp2', 'F3', 'F4', 'C3', 'C4', 'P3', 'P4', 'O1', 'O2',
+                    'F7', 'F8', 'T3', 'T4', 'T5', 'T6', 'Fz', 'Cz', 'Pz']
+
+try:
+    from src.config.config import CHANNEL_NAMES as _CH
+except Exception:  # keep importable standalone
+    _CH = _CANONICAL_ORDER
+
+_REGION_MEMBERS = {
+    "frontal":   ['Fp1', 'Fp2', 'F3', 'F4', 'F7', 'F8', 'Fz'],
+    "central":   ['C3', 'C4', 'Cz'],
+    "temporal":  ['T3', 'T4', 'T5', 'T6'],
+    "parietal":  ['P3', 'P4', 'Pz'],
+    "occipital": ['O1', 'O2'],
+}
+
 REGIONS = {
-    "frontal":   [0, 1, 2, 3, 4, 5, 6],   # Fp1 Fp2 F7 F3 Fz F4 F8
-    "temporal":  [7, 11, 12, 16],          # T3 T4 T5 T6
-    "parietal":  [13, 14, 15],             # P3 Pz P4
-    "occipital": [17, 18],                 # O1 O2
+    region: [_CH.index(name) for name in members if name in _CH]
+    for region, members in _REGION_MEMBERS.items()
 }
 
 
-_trapezoid = getattr(np, "trapezoid", np.trapz)  # numpy 2.x prefers trapezoid
+_trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # numpy 2.x renamed trapz -> trapezoid
 
 
 def _band_powers(psd: np.ndarray, freqs: np.ndarray) -> np.ndarray:
@@ -47,15 +67,21 @@ def _band_powers(psd: np.ndarray, freqs: np.ndarray) -> np.ndarray:
 
 
 def spectral_stream(window: np.ndarray, sfreq: float) -> np.ndarray:
-    """Spectral biomarker vector (118-d).
+    """Spectral biomarker vector (123-d).
 
-    Layout: 19 channels x 5 bands (95) + 4 regions x 5 bands (20) +
+    Layout: 19 channels x 5 bands (95) + 5 regions x 5 bands (25) +
     [theta/alpha ratio, individual alpha peak frequency, spectral entropy] (3).
+
+    Was 118-d with 4 regions; the central region (C3/C4/Cz) was missing and the region
+    index lists pooled the wrong electrodes entirely -- see the note on REGIONS above.
     """
+    # AUDIT H7: explicit Welch parameters (2 s window, 25% overlap) to match the manuscript,
+    # rather than relying on SciPy's default 50% overlap.
     nperseg = min(window.shape[1], int(2 * sfreq))
-    freqs, psd = welch(window, fs=sfreq, nperseg=nperseg, axis=-1)
+    noverlap = int(0.25 * nperseg)
+    freqs, psd = welch(window, fs=sfreq, nperseg=nperseg, noverlap=noverlap, axis=-1)
     rel = _band_powers(psd, freqs)             # [19, 5]
-    region_powers = np.zeros((4, 5), dtype=np.float32)
+    region_powers = np.zeros((len(REGIONS), 5), dtype=np.float32)
     for r_idx, idx in enumerate(REGIONS.values()):
         region_powers[r_idx] = rel[idx].mean(axis=0)
     theta = rel[:, 1].mean()
