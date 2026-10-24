@@ -66,7 +66,13 @@ needs prospective testing before any clinical use.
 ## Weights
 
 Trained weights for both families (all tasks, three seeds, five folds; safetensors with model cards and
-checksums) are released on Hugging Face as **SpectraLite** and **NeuroChronoGraph**.
+checksums) are on Hugging Face:
+
+- [huggingface.co/soinikghosh9/SpectraLite](https://huggingface.co/soinikghosh9/SpectraLite)
+- [huggingface.co/soinikghosh9/NeuroChronoGraph](https://huggingface.co/soinikghosh9/NeuroChronoGraph)
+
+The weights are licensed CC BY-NC 4.0: they were trained on CAUEEG, whose terms allow academic and research
+use only.
 
 ## Quick start
 
@@ -151,4 +157,5 @@ was removed from this branch. It remains in the git history.
 
 ## License and citation
 
-MIT License (see [LICENSE](LICENSE)). If you use the code or weights, please cite the paper above.
+Code: MIT License (see [LICENSE](LICENSE)). Weights: CC BY-NC 4.0, under CAUEEG's academic-and-research-only
+terms. If you use the code or weights, please cite the paper above and the CAUEEG dataset (Kim et al., 2023).
