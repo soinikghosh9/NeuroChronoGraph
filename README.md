@@ -1,6 +1,6 @@
 # NeuroChronoGraph and SpectraLite
 
-**Transferring EEG dementia classifiers and their referral thresholds between independent clinical cohorts**
+**External evaluation of EEG dementia classifiers and their referral thresholds across independent clinical cohorts**
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue.svg)](https://python.org)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.x-red.svg)](https://pytorch.org)
@@ -9,8 +9,8 @@
 
 Code to reproduce every analysis in
 
-> S. Ghosh, R. N. Chaurasia, S. Sharma, and N. Sharma, "Transferring EEG Dementia Classifiers and Their
-> Referral Thresholds Between Independent Clinical Cohorts," manuscript submitted to *IEEE Journal of
+> S. Ghosh, R. N. Chaurasia, S. Sharma, and N. Sharma, "External Evaluation of EEG Dementia Classifiers and Their
+> Referral Thresholds Across Independent Clinical Cohorts," manuscript submitted to *IEEE Journal of
 > Biomedical and Health Informatics*, 2026.
 
 We designed two model families for resting-state EEG dementia screening and tested them among 27 classifiers
