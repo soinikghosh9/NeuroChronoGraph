@@ -19,7 +19,7 @@ on cohorts they were never trained or tuned on:
 - **SpectraLite**: a 75,459-parameter network that reads 12 named spectral markers per electrode
   (relative band powers, alpha peak frequency, aperiodic exponent, slowing ratios, spectral entropy) from
   any subset of 10–20 electrodes and pools them with gated attention.
-- **NeuroChronoGraph (NCG)**: graph–temporal networks of up to 6.3 M parameters. NCG-v3, the best version
+- **NeuroChronoGraph (NCG)**: graph–temporal networks of up to 5.4 M trained parameters. NCG-v3, the best version
   in development, learns electrode nodes from the raw signal through a learned graph, gated graph
   convolutions, and a lobe transformer, fused with a temporal transformer.
 
@@ -33,19 +33,20 @@ its referral threshold from 20 of its own healthy recordings, without patient la
 
 Control versus dementia AUC (three-seed ensembles; internal values out-of-fold):
 
-| Model | Parameters | CAUEEG (internal) | ds004504 | P-ADIC | BrainLat |
+| Model | Trained parameters | CAUEEG (internal) | ds004504 | P-ADIC | BrainLat |
 |---|---:|---:|---:|---:|---:|
 | SpectraLite | 75 k | 0.856 | 0.846 | 0.684 | 0.613 |
-| NCG-v3 | 6.3 M | **0.906** | **0.863** | **0.717** | 0.603 |
-| NCG-v5 | 964 k | 0.874 | 0.822 | 0.676 | 0.609 |
+| NCG-v3 | 5.4 M | **0.906** | **0.863** | **0.717** | 0.603 |
+| NCG-v5 | 915 k | 0.874 | 0.822 | 0.676 | 0.609 |
 | Random forest, 123 QEEG features | – | 0.810 | 0.840 | 0.705 | 0.588 |
 | Median of 22 models | – | 0.841 | 0.840 | 0.682 | 0.621 |
 
 1. **Capacity helped only in development.** NCG-v3 beat SpectraLite internally by 0.049 AUC (95% CI
    0.032–0.067, Holm *P* < 0.001) but by only −0.010 to +0.033 externally; no external paired comparison
    survived Holm correction.
-2. **The cohort mattered more than the model.** Across 26 models at three external dementia cohorts, the
-   cohort explained 89% of the variance in AUC and the model 4%. Healthy recordings alone identified their
+2. **The cohort mattered more than the model.** For control versus Alzheimer's disease, the endpoint defined
+   alike at the three external dementia cohorts, the cohort explained 88% of the variance in AUC across 26 models
+   and the model 5% (89% and 4% for dementia, which counts FTD at two of the three). Healthy recordings alone identified their
    cohort (AUC 0.96–1.00). Severity, age, and education explained part of the gap: mild Alzheimer's disease
    was detected at AUC 0.52 at one cohort, moderate at 0.88. Changing the preprocessing or the recording
    condition in the same 69 subjects moved the median AUC by less than 0.02.
@@ -128,6 +129,8 @@ and checkpoints; results are written to `outputs/`.
 | Prespecified transfer methods | `experiments/249_spectralite_transfer_levers.py`, `251_improvement_summary.py` |
 | MISP (analyzed last, predicted in advance) | `experiments/263_misp_external.py` |
 | Marker validation (paper Fig. 5; predictions in `prespecified/`) | `experiments/264_marker_validation.py` |
+| Residual artifact burden (supplementary Table S17) | `experiments/265_artifact_sensitivity.py` |
+| Parameter counts (trained and declared) | `experiments/227_param_budget.py` |
 | Hugging Face export | `experiments/241_export_hf_release.py` |
 
 Every script documents its inputs and outputs at the top. LaBraM, EEGPT, and CBraMod load through braindecode

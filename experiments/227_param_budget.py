@@ -64,20 +64,32 @@ def main():
         rep["ladder"][k] = count(LadderNet(**kw))
     rep["ladder"]["full graph network (v5)"] = count(v5)
 
-    # every trainable network in the benchmark, counted the same way, for the capacity correlation
+    # every network in the benchmark, for the capacity correlation. The NCG versions carry branches (band
+    # encoders, MMSE and uncertainty heads, metadata conditioning) that get no input or loss in this benchmark,
+    # so the primary count is the parameters that receive a gradient from the classification loss on an
+    # EEG-only batch, exactly as trained; the declared total is kept alongside.
     import importlib.util
     spec = importlib.util.spec_from_file_location("e161", ROOT / "experiments" / "161_deep_per_task.py")
     e161 = importlib.util.module_from_spec(spec); spec.loader.exec_module(e161)
-    allp = {"spectral75k": count(s75), "ncg_v5": count(v5)}
+
+    def trained(model):
+        model.train(); model.zero_grad(set_to_none=True)
+        x = torch.randn(4, 19, 1024); y = torch.tensor([0, 1, 0, 1])
+        torch.nn.functional.cross_entropy(e161.logits(model, x), y).backward()
+        return sum(p.numel() for p in model.parameters() if p.grad is not None)
+
+    nets = {"spectral75k": s75, "ncg_v5": NeuroChronoGraphV5(n_channels=19, n_classes=2)}
     for name in ("shallow", "deep4", "eegnet", "conformer", "atcnet", "eegnex", "eegitnet", "ncg_v2", "ncg_v3"):
         try:
-            allp[name] = count(e161.make_binary(name, "cpu"))
+            nets[name] = e161.make_binary(name, "cpu")
         except Exception as e:                                           # noqa: BLE001
             print(f"  [skip] {name}: {type(e).__name__} {e}")
     for k, kw in LADDER.items():
         if k != "spectral":
-            allp[f"ladder_{k}"] = count(LadderNet(**kw))
+            nets[f"ladder_{k}"] = LadderNet(**kw)
+    allp = {k: trained(m) for k, m in nets.items()}
     rep["all_models"] = allp
+    rep["all_models_declared_total"] = {k: count(m) for k, m in nets.items()}
     print("parameter counts:", json.dumps(allp, indent=1))
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "param_budget.json").write_text(json.dumps(rep, indent=1))
