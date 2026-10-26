@@ -9,7 +9,8 @@ Models
                  electrode (228-d), subject median over windows. This is the fair "same features,
                  different estimator" comparator the montage grid lacked (review C4.2).
     gb, svm, logistic   as in 161 (scikit-learn defaults; SVM RBF; L2 logistic), standardised inputs
-    concept      the sign-constrained concept logistic (companion construct paper), C=0.5
+    concept      the sign-constrained concept logistic, C=0.5 (opt-in via --models; it belongs to the companion
+                 construct paper and is not part of this paper's benchmark)
 
 Unlike 161 the scaler is fitted inside each training fold, so internal OOF scores carry no
 scaling leakage. External scores are the mean of the five fold models, as for the networks.
@@ -89,7 +90,7 @@ def auc(y, s):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="channel_clean")
-    ap.add_argument("--models", default="rf123,rf_node,gb,svm,logistic,concept")
+    ap.add_argument("--models", default="rf123,rf_node,gb,svm,logistic")
     ap.add_argument("--tasks", default=",".join(TASKS))
     ap.add_argument("--rf-seeds", default="42,43,44")
     args = ap.parse_args()

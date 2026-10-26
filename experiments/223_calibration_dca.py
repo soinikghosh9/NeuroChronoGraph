@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "experiments"))
 CAN = ROOT / "outputs" / "results" / "canonical"
 TASKS = ("CN_vs_dementia", "CN_vs_AD", "CN_vs_impaired", "CN_vs_MCI")
-MODELS = ("rf123", "rf_node", "concept", "spectralite16", "ncg_v5", "ncg_v3", "atcnet", "eegnet", "conformer",
+MODELS = ("rf123", "rf_node", "spectralite16", "ncg_v5", "ncg_v3", "atcnet", "eegnet", "conformer",
           "shallow", "deep4", "eegitnet", "eegnex", "gb", "svm", "logistic")
 PREVS = (0.05, 0.10, 0.20)
 

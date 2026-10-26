@@ -11,10 +11,7 @@ Methods
   source_threshold   80th percentile of SOURCE OOF control scores (no local data)
   label_free_quota   refer the top fraction equal to the training-cohort prevalence (no local data)
   local_quantile     80th percentile of the k anchor controls' own scores (any model; no retraining)
-  age_norm_anchor    age-normative deviation re-anchored on the k controls, source threshold
-                     (concept logistic, as in exp 204; Spectral-75k, from exp 217)
-  age_norm_only      age-normative deviation, no anchor (k-independent)
-  age_norm_anchor+local_quantile   both: anchored deviations AND the local 80th-percentile threshold
+  local_conformal    split-conformal threshold from the k anchor controls (the rule reported in the paper)
 
     python experiments/221_local_calibration.py
 Out: outputs/results/canonical/calibration/local_calibration.json (+ per-split npz)
@@ -124,63 +121,14 @@ def operating_points(E, subs, y, s):
     return res
 
 
-def concept_agedev(task, A204, tb):
-    """Exp 204's estimator (L2 logistic on concept features) with raw / age-dev / anchored arms,
-    returning source OOF scores and a function that scores the external site for a given anchor."""
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.model_selection import StratifiedKFold
-    from sklearn.preprocessing import StandardScaler
-    T = tb.subject_table("channel_clean")
-    subs, coh, cls_, X = np.asarray(T["subjects"]), T["cohort"], T["cls"], T["X_concept"]
-    amap = A204.load_ages()
-    ages = np.array([amap.get(A204.keyf(s, c), np.nan) for s, c in zip(subs, coh)], float)
-    pos, neg = {"CN_vs_dementia": (("AD", "FTD"), ("CN",)), "CN_vs_AD": (("AD",), ("CN",)),
-                "CN_vs_impaired": (("AD", "FTD", "MCI"), ("CN",))}[task]
-    cau = np.isfinite(ages) & (coh == "CAUEEG") & np.isin(cls_, pos + neg)
-    ext = np.isfinite(ages) & (coh == "ds004504_raw") & np.isin(cls_, pos + neg)
-    y = np.isin(cls_, pos).astype(int)
-    Xc, yc, ac, Xe, ye, ae = X[cau], y[cau], ages[cau], X[ext], y[ext], ages[ext]
-    m = A204.norm_fit(Xc[yc == 0], ac[yc == 0])
-
-    def fit(Xtr, ytr):
-        sc = StandardScaler().fit(Xtr)
-        f = LogisticRegression(max_iter=2000, C=1.0, class_weight="balanced").fit(sc.transform(Xtr), ytr)
-        return lambda Z: f.predict_proba(sc.transform(Z))[:, 1]
-
-    out = {}
-    for arm in ("raw", "dev"):
-        Xtr = Xc if arm == "raw" else A204.norm_dev(m, Xc, ac)
-        folds = list(StratifiedKFold(5, shuffle=True, random_state=42).split(Xtr, yc))
-        fits = [fit(Xtr[a], yc[a]) for a, _ in folds]
-        oof = np.full(len(yc), np.nan)
-        for (a, b), f in zip(folds, fits):
-            oof[b] = f(Xtr[b])
-        out[arm] = {"fits": fits, "oof": oof}
-    e_subs = subs[ext]
-    s_age = dict(zip(e_subs, ae)); s_X = dict(zip(e_subs, Xe))
-
-    def score(arm, anchor_subjects=None):
-        if arm == "raw":
-            Z = Xe
-        else:
-            anc = None
-            if anchor_subjects is not None:
-                anc = A204.fit_anchor(m, np.stack([s_X[s] for s in anchor_subjects]),
-                                      np.array([s_age[s] for s in anchor_subjects]))
-            Z = A204.norm_dev(m, Xe, ae, anchor=anc)
-        return np.mean([f(Z) for f in out[arm]["fits"]], 0)
-    return {"train_y": yc, "oof": out, "ext_subjects": e_subs, "ext_y": ye, "score": score}
-
-
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    A204 = _load("a204", "204_age_conditioned.py")
     tb = _load("tb", "157_task_battery.py")
     report = {"target_specificity": TARGET_SPEC, "k_values": list(K_VALUES), "n_splits": N_SPLITS, "tasks": {}}
     for task in TASKS:
         tr = {}
         # ---------- score-level methods for every canonical model with scores ----------
-        for model in ("rf123", "rf_node", "concept", "spectralite16", "spectral75k", "ncg_v5", "atcnet", "eegnet"):
+        for model in ("rf123", "rf_node", "spectralite16", "spectral75k", "ncg_v5", "atcnet", "eegnet"):
             E = seed_ensemble(task, model)
             if E is None:
                 continue
@@ -202,33 +150,6 @@ def main():
                   f"sens {k20['source_threshold']['sens']['mean']:.2f} | local20 spec "
                   f"{k20['local_quantile']['spec']['mean']:.2f} sens {k20['local_quantile']['sens']['mean']:.2f}"
                   + extra, flush=True)
-
-        # ---------- concept logistic with age-normative arms (exp 204, cross-fitted anchors) ----------
-        CA = concept_agedev(task, A204, tb)
-        y, subs = CA["ext_y"], CA["ext_subjects"]; ctrl = subs[y == 0]
-        cres = {"by_k": {}}
-        s_raw = CA["score"]("raw"); s_dev = CA["score"]("dev")
-        thr_raw = float(np.quantile(CA["oof"]["raw"]["oof"][CA["train_y"] == 0], TARGET_SPEC))
-        thr_dev = float(np.quantile(CA["oof"]["dev"]["oof"][CA["train_y"] == 0], TARGET_SPEC))
-        from sklearn.metrics import roc_auc_score
-        cres["auc"] = {"raw": float(roc_auc_score(y, s_raw)), "dev": float(roc_auc_score(y, s_dev))}
-        for k in K_VALUES:
-            acc = {"source_threshold": [], "local_quantile": [], "local_conformal": [], "age_norm_only": [],
-                   "age_norm_anchor": [], "age_norm_anchor+local_quantile": []}
-            aucs_anchor = []
-            for anc, held in anchor_splits(ctrl, k):
-                s_anc = CA["score"]("dev", anc); aucs_anchor.append(roc_auc_score(y, s_anc))
-                acc["source_threshold"].append(rates(s_raw, y, subs, thr_raw, held))
-                acc["local_quantile"].append(rates(s_raw, y, subs, float(np.quantile(s_raw[np.isin(subs, anc)], TARGET_SPEC)), held))
-                acc["local_conformal"].append(rates(s_raw, y, subs, conformal_threshold(s_raw[np.isin(subs, anc)]), held))
-                acc["age_norm_only"].append(rates(s_dev, y, subs, thr_dev, held))
-                acc["age_norm_anchor"].append(rates(s_anc, y, subs, thr_dev, held))
-                acc["age_norm_anchor+local_quantile"].append(
-                    rates(s_anc, y, subs, float(np.quantile(s_anc[np.isin(subs, anc)], TARGET_SPEC)), held))
-            cres["by_k"][str(k)] = {meth: {"spec": summarise([a for a, _ in v]), "sens": summarise([b for _, b in v])}
-                                    for meth, v in acc.items()}
-            cres["by_k"][str(k)]["age_norm_anchor_auc"] = summarise(aucs_anchor)
-        tr["concept_logistic_204"] = cres
 
         report["tasks"][task] = tr
         (OUT / "local_calibration.json").write_text(json.dumps(report, indent=1))

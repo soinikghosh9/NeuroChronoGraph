@@ -13,7 +13,7 @@ Code to reproduce every analysis in
 > Referral Thresholds Between Independent Clinical Cohorts," manuscript submitted to *IEEE Journal of
 > Biomedical and Health Informatics*, 2026.
 
-We designed two model families for resting-state EEG dementia screening and tested them among 28 classifiers
+We designed two model families for resting-state EEG dementia screening and tested them among 27 classifiers
 on cohorts they were never trained or tuned on:
 
 - **SpectraLite**: a 75,459-parameter network that reads 12 named spectral markers per electrode
@@ -25,7 +25,7 @@ on cohorts they were never trained or tuned on:
 
 ![Study design, SpectraLite, NeuroChronoGraph-v3, and receiving-site threshold calibration](assets/fig1_design_and_models.png)
 
-*(a) 28 classifiers trained on CAUEEG and applied unchanged to five external cohorts. (b) SpectraLite and
+*(a) 27 classifiers trained on CAUEEG and applied unchanged to five external cohorts. (b) SpectraLite and
 (c) NeuroChronoGraph-v3 for one 4 s window, with per-block parameter counts. (d) A receiving clinic sets
 its referral threshold from 20 of its own healthy recordings, without patient labels.*
 
@@ -39,12 +39,12 @@ Control versus dementia AUC (three-seed ensembles; internal values out-of-fold):
 | NCG-v3 | 6.3 M | **0.906** | **0.863** | **0.717** | 0.603 |
 | NCG-v5 | 964 k | 0.874 | 0.822 | 0.676 | 0.609 |
 | Random forest, 123 QEEG features | – | 0.810 | 0.840 | 0.705 | 0.588 |
-| Median of 23 models | – | 0.840 | 0.840 | 0.681 | 0.618 |
+| Median of 22 models | – | 0.841 | 0.840 | 0.682 | 0.621 |
 
-1. **Capacity helped in development, not at new cohorts.** NCG-v3 beat SpectraLite internally by 0.049 AUC
-   (95% CI 0.032–0.067, Holm *P* < 0.001) but by −0.010 to +0.033 externally; no external paired comparison
+1. **Capacity helped only in development.** NCG-v3 beat SpectraLite internally by 0.049 AUC (95% CI
+   0.032–0.067, Holm *P* < 0.001) but by only −0.010 to +0.033 externally; no external paired comparison
    survived Holm correction.
-2. **The cohort mattered more than the model.** Across 27 models at three external dementia cohorts, the
+2. **The cohort mattered more than the model.** Across 26 models at three external dementia cohorts, the
    cohort explained 89% of the variance in AUC and the model 4%. Healthy recordings alone identified their
    cohort (AUC 0.96–1.00). Severity, age, and education explained part of the gap: mild Alzheimer's disease
    was detected at AUC 0.52 at one cohort, moderate at 0.88. Changing the preprocessing or the recording
@@ -115,7 +115,7 @@ and checkpoints; results are written to `outputs/`.
 | Duration matching, windowing, rejection, 24 windows per subject | `experiments/127_extract_harmonised.py` |
 | P-ADIC, BrainLat, MISP extraction | `experiments/224_padic_site.py`, `232_brainlat_site.py`, `263_misp_external.py` |
 | All networks, internal and external scores, checkpoints | `experiments/211_canonical_benchmark.py` |
-| Classical baselines | `experiments/212_classical_benchmark.py` |
+| Classical baselines (random forests, gradient boosting, SVM, logistic regression) | `experiments/212_classical_benchmark.py` |
 | Pretrained encoders (LaBraM, EEGPT, CBraMod, LEAD) | `experiments/216_fm_matched.py`, `252_fm_external_complete.py` |
 | 16-feature variant | `experiments/237_canonical_spectralite16.py` |
 | Paired tests, equivalence, Holm correction | `experiments/225_merge_stats.py` |
@@ -125,7 +125,7 @@ and checkpoints; results are written to `outputs/`.
 | Age and education | `experiments/248_age_confound_all_sites.py` |
 | Recording condition and preprocessing | `experiments/260_protocol_shift.py`, `260b_protocol_thresholds_ncg.py`, `261_protocol_matched_training.py` |
 | Threshold calibration, clinical metrics | `experiments/221_local_calibration.py`, `250_clinical_metrics.py` |
-| Transfer levers | `experiments/249_spectralite_transfer_levers.py`, `251_improvement_summary.py` |
+| Prespecified transfer methods | `experiments/249_spectralite_transfer_levers.py`, `251_improvement_summary.py` |
 | MISP (analyzed last, predicted in advance) | `experiments/263_misp_external.py` |
 | Marker validation (predictions in `prespecified/`) | `experiments/264_marker_validation.py` |
 | Hugging Face export | `experiments/241_export_hf_release.py` |

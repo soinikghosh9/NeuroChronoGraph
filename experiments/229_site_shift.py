@@ -35,7 +35,7 @@ FEATURES = ("rel. delta", "rel. theta", "rel. alpha", "rel. beta", "rel. gamma",
             "alpha peak prominence", "spectral edge (95%)", "aperiodic exponent", "theta/alpha",
             "slowing ratio", "spectral entropy")
 CONTROL_LABELS = {"CN", "C", "CONTROL"}
-MODELS = ("rf123", "rf_node", "concept", "spectral75k", "ncg_v5", "ncg_v3", "atcnet", "eegnet")
+MODELS = ("rf123", "rf_node", "spectral75k", "ncg_v5", "ncg_v3", "atcnet", "eegnet")
 
 
 def _load(name, file):
