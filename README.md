@@ -119,15 +119,15 @@ and checkpoints; results are written to `outputs/`.
 | Pretrained encoders (LaBraM, EEGPT, CBraMod, LEAD) | `experiments/216_fm_matched.py`, `252_fm_external_complete.py` |
 | 16-feature variant | `experiments/237_canonical_spectralite16.py` |
 | Paired tests, equivalence, Holm correction | `experiments/225_merge_stats.py` |
-| Cohort identity from healthy controls | `experiments/229_site_shift.py` |
-| Cohort-versus-model variance decomposition, severity | `experiments/257_review_revision.py` |
+| Cohort identity from healthy controls (paper Fig. 2b) | `experiments/229_site_shift.py` |
+| Cohort-versus-model variance decomposition, severity (paper Fig. 3a) | `experiments/257_review_revision.py` |
 | Learning curves, recipe sensitivity | `experiments/214_learning_curve.py`, `213_tuning_fairness.py` |
 | Age and education | `experiments/248_age_confound_all_sites.py` |
-| Recording condition and preprocessing | `experiments/260_protocol_shift.py`, `260b_protocol_thresholds_ncg.py`, `261_protocol_matched_training.py` |
-| Threshold calibration, clinical metrics | `experiments/221_local_calibration.py`, `250_clinical_metrics.py` |
+| Recording condition and preprocessing (paper Fig. 3b,c) | `experiments/260_protocol_shift.py`, `260b_protocol_thresholds_ncg.py`, `261_protocol_matched_training.py` |
+| Threshold calibration, clinical metrics, net benefit (paper Fig. 4) | `experiments/221_local_calibration.py`, `250_clinical_metrics.py`, `255_age_adjusted_and_net_benefit.py` |
 | Prespecified transfer methods | `experiments/249_spectralite_transfer_levers.py`, `251_improvement_summary.py` |
 | MISP (analyzed last, predicted in advance) | `experiments/263_misp_external.py` |
-| Marker validation (predictions in `prespecified/`) | `experiments/264_marker_validation.py` |
+| Marker validation (paper Fig. 5; predictions in `prespecified/`) | `experiments/264_marker_validation.py` |
 | Hugging Face export | `experiments/241_export_hf_release.py` |
 
 Every script documents its inputs and outputs at the top. LaBraM, EEGPT, and CBraMod load through braindecode
