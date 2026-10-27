@@ -13,6 +13,9 @@ Code to reproduce every analysis in
 > Referral Thresholds Across Independent Clinical Cohorts," manuscript submitted to *IEEE Journal of
 > Biomedical and Health Informatics*, 2026.
 
+The extended supplementary information (every supplementary analysis, the per-model tables, and the
+TRIPOD+AI checklist; items numbered E in the paper) is [paper/extended_supplement.pdf](paper/extended_supplement.pdf).
+
 We designed two model families for resting-state EEG dementia screening and tested them among 27 classifiers
 on cohorts they were never trained or tuned on:
 

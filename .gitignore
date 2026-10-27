@@ -33,6 +33,7 @@ logs.txt
 *.tex
 *.bib
 *.pdf
+!paper/extended_supplement.pdf
 Figs/
 cover_letter.txt
 review.txt
